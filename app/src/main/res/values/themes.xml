@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.OrcaTTS" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">#00aa44</item>
+    <style name="Theme.OrcaTTS" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#00aa44</item>
         <item name="android:statusBarColor">#0d0d1a</item>
-        <item name="android:navigationBarColor">#0d0d1a</item>
     </style>
 </resources>

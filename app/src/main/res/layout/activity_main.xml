@@ -17,7 +17,7 @@
         android:textStyle="bold"
         android:layout_marginBottom="48dp" />
 
-    <com.google.android.material.button.MaterialButton
+    <Button
         android:id="@+id/toggleBtn"
         android:layout_width="200dp"
         android:layout_height="70dp"
@@ -25,6 +25,6 @@
         android:textColor="#ffffff"
         android:textSize="20sp"
         android:textStyle="bold"
-        android:backgroundTint="#00aa44" />
+        android:background="#00aa44" />
 
 </LinearLayout>

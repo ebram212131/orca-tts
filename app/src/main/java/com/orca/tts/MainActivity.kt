@@ -16,14 +16,12 @@ import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
-import org.msgpack.core.MessageUnpacker
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 
@@ -68,71 +66,50 @@ class TTSServer(
         }
     }
 
-    /**
-     * Parse MessagePack (Rust serde enum format):
-     * - "CancelSpeech"            → string
-     * - {"SpeakText": "hello"}    → map
-     * - ["SpeakText", "hello"]    → array (fallback)
-     */
     private fun parseAndHandle(data: ByteArray) {
+        if (data.isEmpty()) return
+        val firstByte = data[0].toInt() and 0xFF
         val unpacker = org.msgpack.core.MessagePack.newDefaultUnpacker(data)
 
-        // Peek first byte to determine type
-        val firstByte = data[0].toInt() and 0xFF
-
         when {
-            // Fixstr (fixstr = 0xa0-0xbf) or str8/str16/str32
+            // Fixstr or str8/16/32 → "CancelSpeech"
             firstByte == 0xd9 || firstByte == 0xda || firstByte == 0xdb ||
             (firstByte in 0xa0..0xbf) -> {
                 val cmd = unpacker.unpackString()
-                Log.d("TTS", "String cmd: $cmd")
-                if (cmd == "CancelSpeech") {
-                    tts?.stop()
-                    Log.d("TTS", "Cancelled")
-                }
+                Log.d("TTS", "Cmd: $cmd")
+                if (cmd == "CancelSpeech") tts?.stop()
             }
-            // Fixmap (fixmap = 0x80-0x8f) or map8/16/32
+            // Fixmap or map8/16/32 → {"SpeakText": "text"}
             firstByte == 0xde || firstByte == 0xdf ||
             (firstByte in 0x80..0x8f) -> {
                 val size = unpacker.unpackMapHeader()
                 if (size >= 1) {
                     val key = unpacker.unpackString()
-                    Log.d("TTS", "Map key: $key")
                     when (key) {
                         "SpeakText" -> {
                             val text = unpacker.unpackString()
                             Log.d("TTS", "Speak: $text")
-                            if (ttsReady) {
-                                tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "tts")
-                            }
+                            if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "tts")
                         }
-                        "BrailleMessage" -> {
-                            val text = unpacker.unpackString()
-                            Log.d("TTS", "Braille (ignored): $text")
-                        }
+                        "BrailleMessage" -> unpacker.unpackString()
                     }
                 }
             }
-            // Fixarray (fixarray = 0x90-0x9f) or array8/16/32
+            // Fixarray → ["SpeakText", "text"]
             firstByte == 0xdc || firstByte == 0xdd ||
             (firstByte in 0x90..0x9f) -> {
                 val size = unpacker.unpackArrayHeader()
                 if (size >= 1) {
                     val cmd = unpacker.unpackString()
-                    Log.d("TTS", "Array cmd: $cmd")
                     when (cmd) {
-                        "SpeakText" -> {
-                            if (size >= 2) {
-                                val text = unpacker.unpackString()
-                                Log.d("TTS", "Speak (array): $text")
-                                if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "tts")
-                            }
+                        "SpeakText" -> if (size >= 2) {
+                            val text = unpacker.unpackString()
+                            if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "tts")
                         }
                         "CancelSpeech" -> tts?.stop()
                     }
                 }
             }
-            else -> Log.w("TTS", "Unknown format: 0x${firstByte.toString(16)}")
         }
         unpacker.close()
     }
@@ -188,13 +165,13 @@ class TTSService : Service() {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Orca TTS").setContentText(text)
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentIntent(pi).setOngoing(true).build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("Orca TTS").setContentText(text)
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentIntent(pi).setOngoing(true).build()
         }
     }
