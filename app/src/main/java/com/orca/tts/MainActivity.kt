@@ -1,5 +1,6 @@
 package com.orca.tts
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,8 +8,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Bundle
+import android.os.IBinder
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.widget.Button
@@ -17,17 +19,12 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import android.Manifest
-import android.content.pm.PackageManager
 import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
-import org.msgpack.core.MessageFormat
-import org.msgpack.core.MessageUnpacker
 import org.msgpack.core.MessageUnpacker
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
-import android.os.IBinder
 
 // ── WebSocket Server ──────────────────────────────────────────────
 
@@ -39,7 +36,6 @@ class TTSServer(
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
-    private val appContext = context.applicationContext
 
     init {
         tts = TextToSpeech(context) { status ->
@@ -49,12 +45,12 @@ class TTSServer(
     }
 
     override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {
-        Log.d("TTSServer", "Client connected")
+        Log.d("TTS", "Client connected")
         onStatus("Client connected")
     }
 
     override fun onClose(conn: WebSocket?, code: Int, reason: String?, remote: Boolean) {
-        Log.d("TTSServer", "Client disconnected")
+        Log.d("TTS", "Client disconnected")
         onStatus("Waiting for client...")
     }
 
@@ -65,85 +61,83 @@ class TTSServer(
         try {
             val data = ByteArray(message.remaining())
             message.get(data)
-            handleMessage(data)
+            parseAndHandle(data)
         } catch (e: Exception) {
-            Log.e("TTSServer", "Error: ${e.message}")
+            Log.e("TTS", "Error: ${e.message}")
         }
     }
 
     /**
-     * Parse MessagePack exactly like Rust rmp_serde enum format:
-     * - "CancelSpeech"            → just the string
-     * - {"SpeakText": "hello"}    → map with one entry
-     * - {"BrailleMessage": "..."} → ignored
+     * Parse MessagePack (Rust serde enum format):
+     * - "CancelSpeech"            → string
+     * - {"SpeakText": "hello"}    → map
+     * - ["SpeakText", "hello"]    → array (fallback)
      */
-    private fun handleMessage(data: ByteArray) {
+    private fun parseAndHandle(data: ByteArray) {
         val unpacker = org.msgpack.core.MessagePack.newDefaultUnpacker(data)
-        val firstByte = unpacker.nextFormat().formatType
 
-        when (firstByte) {
-            // Unit variant: "CancelSpeech" as raw string
-            MessageFormat.STR.id, MessageFormat.FIXSTR.id -> {
+        // Peek first byte to determine type
+        val firstByte = data[0].toInt() and 0xFF
+
+        when {
+            // Fixstr (fixstr = 0xa0-0xbf) or str8/str16/str32
+            firstByte == 0xd9 || firstByte == 0xda || firstByte == 0xdb ||
+            (firstByte in 0xa0..0xbf) -> {
                 val cmd = unpacker.unpackString()
-                Log.d("TTSServer", "Command: $cmd")
-                when (cmd) {
-                    "CancelSpeech" -> {
-                        tts?.stop()
-                        Log.d("TTSServer", "Speech cancelled")
-                    }
+                Log.d("TTS", "String cmd: $cmd")
+                if (cmd == "CancelSpeech") {
+                    tts?.stop()
+                    Log.d("TTS", "Cancelled")
                 }
             }
-            // Map variant: {"SpeakText": "text"} or {"BrailleMessage": "..."}
-            MessageFormat.MAP.id, MessageFormat.FIXMAP.id -> {
+            // Fixmap (fixmap = 0x80-0x8f) or map8/16/32
+            firstByte == 0xde || firstByte == 0xdf ||
+            (firstByte in 0x80..0x8f) -> {
                 val size = unpacker.unpackMapHeader()
                 if (size >= 1) {
                     val key = unpacker.unpackString()
-                    Log.d("TTSServer", "Map command: $key")
+                    Log.d("TTS", "Map key: $key")
                     when (key) {
                         "SpeakText" -> {
                             val text = unpacker.unpackString()
-                            Log.d("TTSServer", "SpeakText: $text")
+                            Log.d("TTS", "Speak: $text")
                             if (ttsReady) {
                                 tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "tts")
-                            } else {
-                                Log.w("TTSServer", "TTS not ready yet")
                             }
                         }
                         "BrailleMessage" -> {
                             val text = unpacker.unpackString()
-                            Log.d("TTSServer", "BrailleMessage (ignored): $text")
+                            Log.d("TTS", "Braille (ignored): $text")
                         }
                     }
                 }
             }
-            // Array variant (some clients use this): ["SpeakText", "text"]
-            MessageFormat.ARRAY.id, MessageFormat.FIXARRAY.id -> {
+            // Fixarray (fixarray = 0x90-0x9f) or array8/16/32
+            firstByte == 0xdc || firstByte == 0xdd ||
+            (firstByte in 0x90..0x9f) -> {
                 val size = unpacker.unpackArrayHeader()
                 if (size >= 1) {
                     val cmd = unpacker.unpackString()
+                    Log.d("TTS", "Array cmd: $cmd")
                     when (cmd) {
                         "SpeakText" -> {
                             if (size >= 2) {
                                 val text = unpacker.unpackString()
-                                Log.d("TTSServer", "SpeakText (array): $text")
-                                tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "tts")
+                                Log.d("TTS", "Speak (array): $text")
+                                if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "tts")
                             }
                         }
-                        "CancelSpeech" -> {
-                            tts?.stop()
-                        }
+                        "CancelSpeech" -> tts?.stop()
                     }
                 }
             }
-            else -> {
-                Log.w("TTSServer", "Unknown format: $firstByte")
-            }
+            else -> Log.w("TTS", "Unknown format: 0x${firstByte.toString(16)}")
         }
         unpacker.close()
     }
 
     override fun onError(conn: WebSocket?, ex: Exception) {
-        Log.e("TTSServer", "WS error: ${ex.message}")
+        Log.e("TTS", "WS error: ${ex.message}")
     }
 
     override fun onStart() {
@@ -160,7 +154,6 @@ class TTSServer(
 // ── Foreground Service ─────────────────────────────────────────────
 
 class TTSService : Service() {
-
     private var server: TTSServer? = null
 
     companion object {
@@ -170,37 +163,27 @@ class TTSService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = buildNotification("Starting...")
-        startForeground(NOTIFICATION_ID, notification)
-
-        server = TTSServer(this, 3457) { status ->
-            try {
-                val nm = getSystemService(NotificationManager::class.java)
-                nm?.notify(NOTIFICATION_ID, buildNotification(status))
-            } catch (_: Exception) {}
-        }
-        server?.isReuseAddr = true
-        server?.start()
-
-        return START_STICKY
-    }
-
-    private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(CHANNEL_ID, "Orca TTS", NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
         }
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFICATION_ID, buildNotification("Starting..."))
+        server = TTSServer(this, 3457) { status ->
+            try {
+                getSystemService(NotificationManager::class.java)
+                    ?.notify(NOTIFICATION_ID, buildNotification(status))
+            } catch (_: Exception) {}
+        }
+        server?.isReuseAddr = true
+        server?.start()
+        return START_STICKY
+    }
+
     private fun buildNotification(text: String): Notification {
-        val pi = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
+        val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Orca TTS").setContentText(text)
@@ -215,18 +198,13 @@ class TTSService : Service() {
         }
     }
 
-    override fun onDestroy() {
-        try { server?.shutdown() } catch (_: Exception) {}
-        super.onDestroy()
-    }
-
+    override fun onDestroy() { try { server?.shutdown() } catch (_: Exception) {}; super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
 }
 
 // ── Main Activity ──────────────────────────────────────────────────
 
 class MainActivity : AppCompatActivity() {
-
     private lateinit var statusText: TextView
     private lateinit var toggleBtn: Button
     private var running = false
@@ -236,26 +214,21 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         statusText = findViewById(R.id.statusText)
         toggleBtn = findViewById(R.id.toggleBtn)
-        toggleBtn.setOnClickListener { if (running) stopService() else startSvc() }
+        toggleBtn.setOnClickListener { if (running) stopSvc() else startSvc() }
         updateUI()
     }
 
-    override fun onResume() {
-        super.onResume()
-        updateUI()
-    }
+    override fun onResume() { super.onResume(); updateUI() }
 
     private fun startSvc() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
                 return
             }
         }
         startForegroundService(Intent(this, TTSService::class.java))
-        running = true
-        updateUI()
+        running = true; updateUI()
     }
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<String>, results: IntArray) {
@@ -263,11 +236,7 @@ class MainActivity : AppCompatActivity() {
         if (code == 100 && results.isNotEmpty() && results[0] == PackageManager.PERMISSION_GRANTED) startSvc()
     }
 
-    private fun stopService() {
-        stopService(Intent(this, TTSService::class.java))
-        running = false
-        updateUI()
-    }
+    private fun stopSvc() { stopService(Intent(this, TTSService::class.java)); running = false; updateUI() }
 
     private fun updateUI() {
         toggleBtn.text = if (running) "Stop" else "Start"
