@@ -45,6 +45,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.core:core-ktx:1.12.0")
     implementation("org.java-websocket:Java-WebSocket:1.5.6")
     implementation("org.msgpack:msgpack-core:0.9.0")
 }
