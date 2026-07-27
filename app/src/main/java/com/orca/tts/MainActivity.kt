@@ -1,16 +1,15 @@
 package com.orca.tts
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
     private lateinit var toggleBtn: Button
-    private var server: TTSServer? = null
     private var running = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -21,39 +20,38 @@ class MainActivity : AppCompatActivity() {
         toggleBtn = findViewById(R.id.toggleBtn)
 
         toggleBtn.setOnClickListener {
-            if (running) stopServer() else startServer()
+            if (running) stopService() else startService()
         }
+
+        updateUI()
     }
 
-    private fun startServer() {
-        try {
-            server = TTSServer(this, 3457) { status ->
-                runOnUiThread { statusText.text = status }
-            }
-            server?.isReuseAddr = true
-            server?.start()
-            running = true
+    override fun onResume() {
+        super.onResume()
+        updateUI()
+    }
+
+    private fun startService() {
+        val intent = Intent(this, TTSService::class.java)
+        startForegroundService(intent)
+        running = true
+        updateUI()
+    }
+
+    private fun stopService() {
+        val intent = Intent(this, TTSService::class.java)
+        stopService(intent)
+        running = false
+        updateUI()
+    }
+
+    private fun updateUI() {
+        if (running) {
             toggleBtn.text = "Stop"
-            statusText.text = "Server started on port 3457"
-        } catch (e: Exception) {
-            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun stopServer() {
-        try {
-            server?.shutdown()
-            server = null
-            running = false
+            statusText.text = "Server running on port 3457"
+        } else {
             toggleBtn.text = "Start"
-            statusText.text = "Server stopped"
-        } catch (e: Exception) {
-            Toast.makeText(this, "Error stopping: ${e.message}", Toast.LENGTH_SHORT).show()
+            statusText.text = "Ready"
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        if (running) stopServer()
     }
 }
