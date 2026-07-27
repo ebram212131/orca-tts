@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import android.speech.tts.TextToSpeech
 import android.util.Log
 import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
@@ -24,12 +23,12 @@ class TTSServer(
     private val onStatus: (String) -> Unit
 ) : WebSocketServer(InetSocketAddress(port)) {
 
-    private var tts: TextToSpeech? = null
+    private var tts: android.speech.tts.TextToSpeech? = null
     private var ready = false
 
     init {
-        tts = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
+        tts = android.speech.tts.TextToSpeech(context) { status ->
+            if (status == android.speech.tts.TextToSpeech.SUCCESS) {
                 ready = true
                 onStatus("TTS Ready")
             }
@@ -63,7 +62,7 @@ class TTSServer(
                     "SpeakText" -> {
                         if (arraySize >= 2) {
                             val text = unpacker.unpackString()
-                            tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "tts_${System.currentTimeMillis()}")
+                            tts?.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "tts_${System.currentTimeMillis()}")
                         }
                     }
                     "CancelSpeech" -> {
