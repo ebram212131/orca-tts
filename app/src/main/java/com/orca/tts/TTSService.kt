@@ -24,13 +24,11 @@ class TTSServer(
 ) : WebSocketServer(InetSocketAddress(port)) {
 
     private var tts: android.speech.tts.TextToSpeech? = null
-    private var ready = false
 
     init {
         tts = android.speech.tts.TextToSpeech(context) { status ->
             if (status == android.speech.tts.TextToSpeech.SUCCESS) {
-                ready = true
-                onStatus("TTS Ready")
+                onStatus("TTS Ready - port $port")
             }
         }
     }
@@ -40,171 +38,139 @@ class TTSServer(
     }
 
     override fun onClose(conn: WebSocket?, code: Int, reason: String?, remote: Boolean) {
-        onStatus("Client disconnected")
+        onStatus("Server running - port ${port}")
     }
 
-    override fun onMessage(conn: WebSocket?, message: String?) {
-        // text messages ignored
-    }
+    override fun onMessage(conn: WebSocket?, message: String?) {}
 
     override fun onMessage(conn: WebSocket?, message: ByteBuffer?) {
         message ?: return
         try {
             val data = ByteArray(message.remaining())
             message.get(data)
-
             val unpacker = org.msgpack.core.MessagePack.newDefaultUnpacker(data)
             val arraySize = unpacker.unpackArrayHeader()
-
             if (arraySize >= 1) {
                 val cmd = unpacker.unpackString()
                 when (cmd) {
                     "SpeakText" -> {
                         if (arraySize >= 2) {
                             val text = unpacker.unpackString()
-                            tts?.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "tts_${System.currentTimeMillis()}")
+                            tts?.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "tts")
                         }
                     }
-                    "CancelSpeech" -> {
-                        tts?.stop()
-                    }
+                    "CancelSpeech" -> tts?.stop()
                 }
             }
             unpacker.close()
         } catch (e: Exception) {
-            Log.e("TTSServer", "Error parsing message", e)
+            Log.e("TTSServer", "Parse error", e)
         }
     }
 
     override fun onError(conn: WebSocket?, ex: Exception) {
-        Log.e("TTSServer", "Error", ex)
+        Log.e("TTSServer", "WS error", ex)
     }
 
     override fun onStart() {
-        onStatus("Server running on port ${port}")
+        onStatus("Server running - port ${port}")
     }
 
     fun shutdown() {
-        tts?.stop()
-        tts?.shutdown()
-        stop()
+        try { tts?.stop() } catch (_: Exception) {}
+        try { tts?.shutdown() } catch (_: Exception) {}
+        try { stop() } catch (_: Exception) {}
     }
 }
 
 class TTSService : Service() {
 
     private var server: TTSServer? = null
-    private var notificationManager: NotificationManager? = null
 
     companion object {
-        const val CHANNEL_ID = "orca_tts_channel"
+        const val CHANNEL_ID = "orca_tts"
         const val NOTIFICATION_ID = 1
-        const val ACTION_STOP = "com.orca.tts.STOP"
     }
 
     override fun onCreate() {
         super.onCreate()
-        notificationManager = getSystemService(NotificationManager::class.java)
-        createNotificationChannel()
+        try {
+            createNotificationChannel()
+        } catch (e: Exception) {
+            Log.e("TTSService", "Channel error", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
+        try {
+            val notification = buildNotification("Starting...")
+            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Log.e("TTSService", "startForeground error", e)
             stopSelf()
             return START_NOT_STICKY
         }
 
-        val notification = buildNotification("Server running on port 3457")
-        startForeground(NOTIFICATION_ID, notification)
-
-        startServer()
-
-        return START_STICKY
-    }
-
-    private fun startServer() {
         try {
             server = TTSServer(this, 3457) { status ->
-                updateNotification(status)
+                try {
+                    val n = buildNotification(status)
+                    val nm = getSystemService(NotificationManager::class.java)
+                    nm?.notify(NOTIFICATION_ID, n)
+                } catch (_: Exception) {}
             }
             server?.isReuseAddr = true
             server?.start()
         } catch (e: Exception) {
-            Log.e("TTSService", "Error starting server", e)
+            Log.e("TTSService", "Server start error", e)
             stopSelf()
         }
-    }
 
-    private fun stopServer() {
-        server?.shutdown()
-        server = null
+        return START_STICKY
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Orca TTS Server",
+                "Orca TTS",
                 NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Orca TTS WebSocket Server"
-            }
-            notificationManager?.createNotificationChannel(channel)
+            )
+            val nm = getSystemService(NotificationManager::class.java)
+            nm?.createNotificationChannel(channel)
         }
     }
 
     private fun buildNotification(text: String): Notification {
-        val stopIntent = Intent(this, TTSService::class.java).apply {
-            action = ACTION_STOP
-        }
-        val stopPendingIntent = PendingIntent.getService(
-            this, 0, stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
         val openIntent = Intent(this, MainActivity::class.java)
-        val openPendingIntent = PendingIntent.getActivity(
+        val pi = PendingIntent.getActivity(
             this, 0, openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_IMMUTABLE
         )
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("Orca TTS Server")
+                .setContentTitle("Orca TTS")
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentIntent(openPendingIntent)
-                .addAction(
-                    Notification.Action.Builder(
-                        null, "Stop", stopPendingIntent
-                    ).build()
-                )
+                .setContentIntent(pi)
                 .setOngoing(true)
                 .build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
-                .setContentTitle("Orca TTS Server")
+                .setContentTitle("Orca TTS")
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentIntent(openPendingIntent)
-                .addAction(
-                    Notification.Action.Builder(
-                        null, "Stop", stopPendingIntent
-                    ).build()
-                )
+                .setContentIntent(pi)
                 .setOngoing(true)
                 .build()
         }
     }
 
-    private fun updateNotification(text: String) {
-        val notification = buildNotification(text)
-        notificationManager?.notify(NOTIFICATION_ID, notification)
-    }
-
     override fun onDestroy() {
-        stopServer()
+        try { server?.shutdown() } catch (_: Exception) {}
+        server = null
         super.onDestroy()
     }
 
