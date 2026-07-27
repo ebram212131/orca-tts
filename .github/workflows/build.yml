@@ -35,20 +35,22 @@ jobs:
         with:
           gradle-version: '8.2'
 
-      - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon
-
-      - name: Sign APK
+      - name: Build Signed Release APK
         run: |
-          ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
-            --ks keystore.jks \
-            --ks-pass pass:orca1234 \
-            --key-pass pass:orca1234 \
-            --ks-key-alias orca \
-            app/build/outputs/apk/debug/app-debug.apk
+          gradle assembleRelease \
+            -Pandroid.injected.signing.store.file=keystore.jks \
+            -Pandroid.injected.signing.store.password=orca1234 \
+            -Pandroid.injected.signing.key.alias=orca \
+            -Pandroid.injected.signing.key.password=orca1234 \
+            --no-daemon
+
+      - name: Rename APK
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk orca-tts-server.apk || true
+          cp app/build/outputs/apk/debug/app-debug.apk orca-tts-server.apk || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: orca-tts-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: orca-tts-server
+          path: orca-tts-server.apk
