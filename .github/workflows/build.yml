@@ -30,49 +30,22 @@ jobs:
             -storepass orca1234 -keypass orca1234 \
             -dname "CN=Orca, OU=Dev, O=Orca, L=Tehran, ST=Iran, C=IR"
 
-      - name: Decode keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks || true
-
-      - name: Create keystore from secret or generate
-        run: |
-          if [ ! -f keystore.jks ] || [ ! -s keystore.jks ]; then
-            keytool -genkeypair -v \
-              -keystore keystore.jks \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -alias orca \
-              -storepass orca1234 -keypass orca1234 \
-              -dname "CN=Orca, OU=Dev, O=Orca, L=Tehran, ST=Iran, C=IR"
-          fi
-
       - name: Build Debug APK
         run: |
-          chmod +x gradlew 2>/dev/null || true
-          ./gradlew assembleDebug --no-daemon 2>&1 || gradle assembleDebug --no-daemon 2>&1
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
 
       - name: Sign APK
         run: |
-          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-            -keystore keystore.jks \
-            -storepass orca1234 \
-            app/build/outputs/apk/debug/app-debug.apk orca || true
-
-          ${ANDROID_HOME}/build-tools/$(ls ${ANDROID_HOME}/build-tools/ | tail -1)/zipalign \
-            -v 4 \
-            app/build/outputs/apk/debug/app-debug.apk \
-            app/build/outputs/apk/debug/app-aligned.apk || true
-
-          ${ANDROID_HOME}/build-tools/$(ls ${ANDROID_HOME}/build-tools/ | tail -1)/apksigner sign \
+          ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
             --ks keystore.jks \
             --ks-pass pass:orca1234 \
             --key-pass pass:orca1234 \
             --ks-key-alias orca \
-            app/build/outputs/apk/debug/app-aligned.apk || true
+            app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: orca-tts-apk
-          path: |
-            app/build/outputs/apk/debug/app-aligned.apk
-            app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: warn
+          path: app/build/outputs/apk/debug/app-debug.apk
