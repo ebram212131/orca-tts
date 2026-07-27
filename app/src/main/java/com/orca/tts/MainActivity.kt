@@ -1,6 +1,7 @@
 package com.orca.tts
 
 import android.Manifest
+import android.app.Activity
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -16,7 +17,6 @@ import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.java_websocket.WebSocket
@@ -72,14 +72,11 @@ class TTSServer(
         val unpacker = org.msgpack.core.MessagePack.newDefaultUnpacker(data)
 
         when {
-            // Fixstr or str8/16/32 → "CancelSpeech"
             firstByte == 0xd9 || firstByte == 0xda || firstByte == 0xdb ||
             (firstByte in 0xa0..0xbf) -> {
                 val cmd = unpacker.unpackString()
-                Log.d("TTS", "Cmd: $cmd")
                 if (cmd == "CancelSpeech") tts?.stop()
             }
-            // Fixmap or map8/16/32 → {"SpeakText": "text"}
             firstByte == 0xde || firstByte == 0xdf ||
             (firstByte in 0x80..0x8f) -> {
                 val size = unpacker.unpackMapHeader()
@@ -88,14 +85,12 @@ class TTSServer(
                     when (key) {
                         "SpeakText" -> {
                             val text = unpacker.unpackString()
-                            Log.d("TTS", "Speak: $text")
                             if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "tts")
                         }
                         "BrailleMessage" -> unpacker.unpackString()
                     }
                 }
             }
-            // Fixarray → ["SpeakText", "text"]
             firstByte == 0xdc || firstByte == 0xdd ||
             (firstByte in 0x90..0x9f) -> {
                 val size = unpacker.unpackArrayHeader()
@@ -182,7 +177,7 @@ class TTSService : Service() {
 
 // ── Main Activity ──────────────────────────────────────────────────
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
     private lateinit var statusText: TextView
     private lateinit var toggleBtn: Button
     private var running = false

@@ -11,8 +11,8 @@ android {
         applicationId = "com.orca.tts"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
 
     signingConfigs {
@@ -45,7 +45,6 @@ android {
 }
 
 dependencies {
-    implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("org.java-websocket:Java-WebSocket:1.5.6")
     implementation("org.msgpack:msgpack-core:0.9.0")
 }
