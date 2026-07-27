@@ -7,7 +7,6 @@ import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
 import org.msgpack.core.MessageUnpacker
-import org.msgpack.core.MessageFactory
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 
