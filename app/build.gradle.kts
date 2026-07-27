@@ -17,7 +17,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("../keystore.jks")
+            storeFile = rootProject.file("keystore.jks")
             storePassword = "orca1234"
             keyAlias = "orca"
             keyPassword = "orca1234"
@@ -30,7 +30,7 @@ android {
             signingConfig = signingConfigs.getByName("release")
         }
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
         }
     }
 
